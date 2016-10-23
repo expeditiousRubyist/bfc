@@ -2,12 +2,8 @@
 	.globl	_start
 	.globl	bfmain
 _start:
-	pushq	%rbx
-	pushq	%r12
 	xorl	%r12d, %r12d
 	call	bfmain
-	popq	%r12
-	popq	%rbx
 	movl	$60, %eax
 	xorl	%edi, %edi
 	syscall

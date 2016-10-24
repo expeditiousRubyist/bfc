@@ -1,154 +1,10 @@
 #!/usr/bin/env ruby
 
 require 'optparse'
-require 'fileutils'
 require 'singleton'
 
 DataArithmetic = Struct.new :value
 PointerArithmetic = Struct.new :value
-
-# Generic class for code generators to inherit from
-# Handles all non architecture-specific activities in code generation
-class Codegen
-  include FileUtils
-  def initialize stack_size
-    @as = "#{@prefix}as"
-    @ld = "#{@prefix}ld"
-    @label_number = 0
-    @stack_size = stack_size
-  end
-
-  def compile_executable
-    @asmout.close
-    binfile = File.basename @asmsrc, '.*'
-    objfile = "#{binfile}.o"
-    `#{@as} #{@asmsrc} -o #{objfile}`
-    `#{@ld} #{objfile} -o #{binfile}`
-    rm @asmsrc
-    rm objfile
-  end
-
-  def gen_preamble
-    dirname = File.dirname __FILE__
-    @asmout.write File.read("#{dirname}/asm/#{@prefix}preamble.s")
-  end
-
-  def fresh_label
-    @label_number += 1
-    ".L#{@label_number}"
-  end
-end
-
-# Code generator for our currently only supported target, x86_64-linux-gnu
-class GnuLinuxAmd64Codegen < Codegen
-  def initialize stack_size
-    @prefix = 'x86_64-linux-gnu-'
-    @asmsrc = 'out.s' # TODO: make this settable via argument?
-    @asmout = File.open(@asmsrc, 'w')
-    super
-  end
-
-  def gen_code tokens
-    @data_op = true
-    @begin_label_stack = []
-    @end_label_stack = []
-
-    gen_preamble
-
-    tokens.each do |tok|
-      case tok
-      when DataArithmetic then gen_data_op tok.value
-      when PointerArithmetic then gen_pointer_op tok.value
-      when :loopbegin then gen_loop_begin
-      when :loopend then gen_loop_end
-      when :putchar then gen_putchar
-      when :getchar then gen_getchar
-      end
-    end
-
-    gen_postamble
-    compile_executable
-  end
-private
-  def gen_preamble
-    super
-    @asmout.puts 'bfmain:'
-    @asmout.puts "\tsubq\t$#{@stack_size}, %rsp"
-    @asmout.puts "\tmovq\t%rsp, %rbx"
-    @asmout.puts "\tinc %rbx"
-  end
-
-  def gen_postamble
-    @asmout.puts "\taddq\t$#{@stack_size}, %rsp"
-    @asmout.puts "\tret"
-  end
-
-  def gen_data_op amount
-    return if amount.zero?
-    restore_register_if_changed
-
-    if amount < 0 then
-      @asmout.puts "\tsubb\t$#{amount.abs}, %r12b"
-    else
-      @asmout.puts "\taddb\t$#{amount}, %r12b"
-    end
-  end
-
-  def gen_pointer_op amount
-    return if amount.zero?
-    save_register_if_changed
-
-    # TODO: Consider adding option of overflow checking?
-    if amount < 0 then
-      @asmout.puts "\tsubq\t$#{amount.abs}, %rbx"
-    else
-      @asmout.puts "\taddq\t$#{amount}, %rbx"
-    end
-  end
-
-  def gen_loop_begin
-    restore_register_if_changed
-
-    begin_label = fresh_label
-    @asmout.puts "#{begin_label}:"
-    @begin_label_stack.push begin_label
-
-    end_label = fresh_label
-    @asmout.puts "\ttestb\t%r12b, %r12b"
-    @asmout.puts "\tje\t#{end_label}"
-    @end_label_stack.push end_label
-  end
-
-  def gen_loop_end
-    restore_register_if_changed
-    @asmout.puts "\tjmp\t#{@begin_label_stack.pop}"
-    @asmout.puts "#{@end_label_stack.pop}:"
-  end
-
-  def gen_putchar
-    save_register_if_changed
-    @asmout.puts "\tcall\tbfputchar"
-  end
-
-  def gen_getchar
-    @data_op = false # Note: no need to save_register_if_changed b/c overriding.
-    @asmout.puts "\tcall\tbfgetchar"
-  end
-
-  def save_register_if_changed
-    if @data_op then
-      @asmout.puts "\tmovb\t%r12b, (%rbx)"
-      @data_op = false
-    end
-  end
-
-  def restore_register_if_changed
-    unless @data_op
-      @asmout.puts "\tmovb\t(%rbx), %r12b"
-      @data_op = true
-    end
-  end
-end
 
 class MainProgram < OptionParser
   include Singleton
@@ -182,12 +38,18 @@ class MainProgram < OptionParser
     rescue OptionParser::InvalidOption => e; abort e.message
     end
 
+    dirname = File.dirname __FILE__
+    begin require "#{dirname}/codegen/#{@target}-codegen.rb"
+    rescue LoadError => e; abort 'error: unsupported target'
+    end
+
     @filename = ARGV.shift or abort "error: no input file"
-    @template = case @target
+    generator = case @target
                 when 'x86_64-linux-gnu' then GnuLinuxAmd64Codegen
                 else abort 'error: unsupported target'
                 end
-    @codegen = @template.new @stack_size
+
+    @codegen = generator.new @stack_size
 
     begin @file = File.open @filename
     rescue Errno::ENOENT => e; abort e.message

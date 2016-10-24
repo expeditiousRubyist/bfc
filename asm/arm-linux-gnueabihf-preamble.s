@@ -13,11 +13,11 @@ bfgetchar:
 	mov	r2, #1
 	mov	r7, #3
 	swi	#0
-	b	lr
+	bx	lr
 bfputchar:
 	mov	r0, #1
 	mov	r1, r4
 	mov	r2, #1
 	mov	r7, #4
 	swi	#0
-	b	lr
+	bx	lr

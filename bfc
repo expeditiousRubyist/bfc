@@ -9,7 +9,10 @@ PointerArithmetic = Struct.new :value
 class MainProgram < OptionParser
   include Singleton
 
-  SUPPORTED_TARGETS = ['x86_64-linux-gnu']
+  SUPPORTED_TARGETS = [
+    'x86_64-linux-gnu',
+    'arm-linux-gnueabihf'
+  ]
 
   def initialize
     super do |opts|
@@ -46,6 +49,7 @@ class MainProgram < OptionParser
     @filename = ARGV.shift or abort "error: no input file"
     generator = case @target
                 when 'x86_64-linux-gnu' then GnuLinuxAmd64Codegen
+                when 'arm-linux-gnueabihf' then GnuLinuxArmHfCodegen
                 else abort 'error: unsupported target'
                 end
 
@@ -113,6 +117,7 @@ private
     end
   end
 
+  # FIXME: Determine native CPU and OS
   def get_native_target
     'x86_64-linux-gnu'
   end
